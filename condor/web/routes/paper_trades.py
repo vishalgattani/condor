@@ -5,7 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 
 from condor.web.auth import get_current_user
 from condor.web.models import WebUser
@@ -22,7 +23,7 @@ def _instances_dir() -> Path:
     env = os.environ.get("HUMMINGBOT_INSTANCES_DIR", "").strip()
     if env:
         return Path(env)
-    return Path(__file__).resolve().parents[5] / "hummingbot-api" / "bots" / "instances"
+    return Path(__file__).resolve().parents[4] / "hummingbot-api" / "bots" / "instances"
 
 
 def _summarize(trades: list[dict]) -> dict[str, Any]:
@@ -94,3 +95,23 @@ async def get_paper_trades(bot_name: str, user: WebUser = Depends(get_current_us
         "summary": _summarize(trades),
         "trades": trades,
     }
+
+
+@router.get("/paper-trades/{bot_name}/logs")
+async def get_bot_logs(
+    bot_name: str,
+    lines: int = Query(default=100, ge=1, le=2000),
+    user: WebUser = Depends(get_current_user),
+):
+    """Return the last N lines from a bot's log file."""
+    log_file = _instances_dir() / bot_name / "logs" / "logs_hummingbot.log"
+    if not log_file.exists():
+        return {"bot_name": bot_name, "lines": []}
+    try:
+        # Read last `lines` lines efficiently without loading full file
+        content = log_file.read_bytes()
+        raw_lines = content.split(b"\n")
+        tail = [l.decode("utf-8", errors="replace") for l in raw_lines[-lines - 1:] if l]
+        return {"bot_name": bot_name, "lines": tail}
+    except Exception:
+        return {"bot_name": bot_name, "lines": []}

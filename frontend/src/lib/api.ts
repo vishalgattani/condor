@@ -1284,4 +1284,9 @@ export const api = {
 
   getPaperTradesForBot: (botName: string) =>
     apiFetch<PaperTradeBot>(`/api/v1/paper-trades/${encodeURIComponent(botName)}`),
+
+  getBotLogs: (botName: string, lines = 100) =>
+    apiFetch<{ bot_name: string; lines: string[] }>(
+      `/api/v1/paper-trades/${encodeURIComponent(botName)}/logs?lines=${lines}`,
+    ),
 };

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   CartesianGrid,
@@ -13,6 +13,7 @@ import {
 import { Activity } from "lucide-react";
 
 import { api, type PaperTrade, type PaperTradeBot } from "@/lib/api";
+import { Terminal } from "lucide-react";
 import { pnlColor } from "@/lib/formatters";
 
 // ── Helpers ──
@@ -196,6 +197,65 @@ function BotTab({ bot, active, onClick }: { bot: PaperTradeBot; active: boolean;
   );
 }
 
+// ── Log viewer ──
+
+function BotLogViewer({ botName }: { botName: string }) {
+  const [open, setOpen] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const { data, dataUpdatedAt } = useQuery({
+    queryKey: ["bot-logs", botName],
+    queryFn: () => api.getBotLogs(botName, 150),
+    refetchInterval: open ? 5_000 : false,
+    enabled: open,
+  });
+
+  useEffect(() => {
+    if (open && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [dataUpdatedAt, open]);
+
+  function lineColor(line: string) {
+    if (line.includes(" - ERROR") || line.includes("Traceback") || line.includes("EAPI"))
+      return "text-red-400";
+    if (line.includes(" - WARNING") || line.includes("rate limit"))
+      return "text-amber-400";
+    if (line.includes("BUY") || line.includes("SELL") || line.includes("PAPER"))
+      return "text-green-400";
+    return "text-[var(--color-text-muted)]";
+  }
+
+  return (
+    <div className="rounded-lg border border-[var(--color-border)]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs font-medium text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] transition-colors rounded-lg"
+      >
+        <Terminal className="h-3.5 w-3.5" />
+        <span>Bot Logs</span>
+        <span className="ml-auto text-[10px]">{open ? "▲ hide" : "▼ show"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-[var(--color-border)] bg-[#0d0d0d] rounded-b-lg overflow-hidden">
+          <div className="h-72 overflow-y-auto p-3 font-mono text-[10px] leading-relaxed">
+            {data?.lines.length === 0 && (
+              <span className="text-[var(--color-text-muted)]">No log file found yet.</span>
+            )}
+            {data?.lines.map((line, i) => (
+              <div key={i} className={lineColor(line)}>{line}</div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+          <div className="border-t border-[var(--color-border)] px-3 py-1.5 text-[10px] text-[var(--color-text-muted)]">
+            Last 150 lines · refreshes every 5s
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ──
 
 export function PaperTrades() {
@@ -295,6 +355,9 @@ export function PaperTrades() {
 
           {/* Trade table */}
           <TradeTable trades={bot.trades} />
+
+          {/* Log viewer */}
+          <BotLogViewer botName={bot.bot_name} />
         </>
       )}
     </div>
