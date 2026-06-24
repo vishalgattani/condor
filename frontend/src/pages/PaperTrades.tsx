@@ -126,12 +126,7 @@ function KpiCard({ label, value, sub, color }: { label: string; value: string; s
 
 function TradeTable({ trades }: { trades: PaperTrade[] }) {
   const sells = trades.filter((t) => t.side === "SELL");
-  if (sells.length === 0) return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center space-y-1">
-      <p className="text-sm text-[var(--color-text-muted)]">No closed trades yet.</p>
-      <p className="text-xs text-[var(--color-text-muted)]">Waiting for RSI &lt; 35 + EMA fast cross above EMA slow on the 1h ETH-USD candle.</p>
-    </div>
-  );
+  if (sells.length === 0) return null;
 
   return (
     <div className="overflow-x-auto rounded-lg border border-[var(--color-border)]">
