@@ -12,6 +12,7 @@ import { Bots } from "@/pages/Bots";
 import { CreateExecutor } from "@/pages/CreateExecutor";
 import { Executors } from "@/pages/Executors";
 import { Login } from "@/pages/Login";
+import { PaperTrades } from "@/pages/PaperTrades";
 import { Portfolio } from "@/pages/Portfolio";
 import { Routines } from "@/pages/Routines";
 import { Settings } from "@/pages/Settings";
@@ -65,6 +66,7 @@ export default function App() {
                 <Route path="/executors/new-grid" element={<Navigate to="/trade?type=grid" replace />} />
                 <Route path="/backtest" element={<Navigate to="/bots?tab=backtest" replace />} />
                 <Route path="/archived" element={<Navigate to="/bots?tab=archived" replace />} />
+                <Route path="/paper-trades" element={<PaperTrades />} />
                 <Route path="/routines" element={<Routines />} />
                 <Route path="/reports" element={<Navigate to="/routines?tab=reports" replace />} />
                 <Route path="/agents" element={<Agents />} />

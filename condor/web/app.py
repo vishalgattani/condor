@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from condor.web.routes import agents, archived, auth, backtesting, bots, chat_ws, controller_performance, executors, market, portfolio, positions, reports, routines, servers, settings, transcribe, ws
+from condor.web.routes import agents, archived, auth, backtesting, bots, chat_ws, controller_performance, executors, market, paper_trades, portfolio, positions, reports, routines, servers, settings, transcribe, ws
 
 
 def _build_cors_origins() -> list[str]:
@@ -59,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(settings.router, prefix="/api/v1")
     app.include_router(chat_ws.router, prefix="/api/v1")
     app.include_router(transcribe.router, prefix="/api/v1")
+    app.include_router(paper_trades.router, prefix="/api/v1")
 
     # ── Serve report HTML files ──
     reports_dir = Path(__file__).resolve().parent.parent.parent / "reports"

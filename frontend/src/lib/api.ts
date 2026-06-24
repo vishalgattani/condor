@@ -610,6 +610,42 @@ export interface ChatOptionsResponse {
   default_mode: string;
 }
 
+// ── Paper Trades ──
+
+export interface PaperTrade {
+  trade_num: number;
+  side: "BUY" | "SELL";
+  timestamp: string;
+  price: number;
+  amount_usd: number;
+  rsi: number;
+  ema_fast?: number;
+  ema_slow?: number;
+  reason?: string;
+  entry_price?: number;
+  pnl_usd?: number;
+  pnl_pct?: number;
+  cumulative_pnl_usd?: number;
+}
+
+export interface PaperTradeSummary {
+  closed_trades: number;
+  open_trade: PaperTrade | null;
+  total_pnl: number;
+  wins: number;
+  losses: number;
+  win_rate: number;
+  avg_win: number;
+  avg_loss: number;
+  buy_count: number;
+}
+
+export interface PaperTradeBot {
+  bot_name: string;
+  summary: PaperTradeSummary | null;
+  trades: PaperTrade[];
+}
+
 // ── Backtesting ──
 
 export interface BacktestTask {
@@ -1240,4 +1276,12 @@ export const api = {
 
   getChatOptions: () =>
     apiFetch<ChatOptionsResponse>("/api/v1/chat/options"),
+
+  // ── Paper Trades ──
+
+  getPaperTrades: () =>
+    apiFetch<PaperTradeBot[]>("/api/v1/paper-trades"),
+
+  getPaperTradesForBot: (botName: string) =>
+    apiFetch<PaperTradeBot>(`/api/v1/paper-trades/${encodeURIComponent(botName)}`),
 };

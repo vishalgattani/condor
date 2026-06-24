@@ -1,0 +1,302 @@
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import {
+  Area,
+  CartesianGrid,
+  ComposedChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { Activity } from "lucide-react";
+
+import { api, type PaperTrade, type PaperTradeBot } from "@/lib/api";
+import { pnlColor } from "@/lib/formatters";
+
+// ── Helpers ──
+
+function fmt(ts: string) {
+  const d = new Date(ts);
+  return d.toLocaleString("en-US", {
+    month: "short", day: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
+function fmtPrice(v: number) {
+  return v >= 1000
+    ? "$" + v.toLocaleString("en-US", { maximumFractionDigits: 2 })
+    : "$" + v.toFixed(4);
+}
+
+function sign(v: number) { return v >= 0 ? "+" : ""; }
+
+// ── Cumulative P/L chart ──
+
+interface ChartPoint { time: number; pnl: number }
+
+function PnlChart({ trades }: { trades: PaperTrade[] }) {
+  const data = useMemo<ChartPoint[]>(() => {
+    const sells = trades.filter((t) => t.side === "SELL");
+    if (sells.length === 0) return [];
+    return sells.map((t) => ({
+      time: new Date(t.timestamp).getTime(),
+      pnl: t.cumulative_pnl_usd ?? 0,
+    }));
+  }, [trades]);
+
+  if (data.length < 2) return (
+    <div className="flex h-48 items-center justify-center text-[var(--color-text-muted)] text-sm">
+      Waiting for closed trades to chart…
+    </div>
+  );
+
+  const latest = data[data.length - 1].pnl;
+  const lineColor = latest >= 0 ? "#22c55e" : "#ef4444";
+
+  const fmtTime = (ms: number) =>
+    new Date(ms).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+
+  return (
+    <ResponsiveContainer width="100%" height={200}>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+        <defs>
+          <linearGradient id="paperPnlGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={lineColor} stopOpacity={0.2} />
+            <stop offset="95%" stopColor={lineColor} stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" strokeOpacity={0.4} />
+        <XAxis
+          dataKey="time"
+          type="number"
+          domain={["dataMin", "dataMax"]}
+          tickFormatter={fmtTime}
+          tick={{ fontSize: 10, fill: "var(--color-text-muted)" }}
+          stroke="var(--color-border)"
+          tickLine={false}
+        />
+        <YAxis
+          tickFormatter={(v) => `$${v.toFixed(2)}`}
+          tick={{ fontSize: 10, fill: "var(--color-text-muted)" }}
+          stroke="var(--color-border)"
+          tickLine={false}
+          axisLine={false}
+          width={56}
+        />
+        <ReferenceLine y={0} stroke="var(--color-text-muted)" strokeOpacity={0.4} strokeDasharray="4 4" />
+        <Tooltip
+          content={({ active, payload, label }) => {
+            if (!active || !payload?.length || label == null) return null;
+            const pnl = payload[0].value as number;
+            const labelMs = typeof label === "number" ? label : Number(label);
+            return (
+              <div className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/95 px-2.5 py-2 text-xs shadow-lg">
+                <div className="text-[var(--color-text-muted)] mb-1">{fmtTime(labelMs)}</div>
+                <div style={{ color: pnlColor(pnl) }} className="font-semibold">
+                  {sign(pnl)}${pnl.toFixed(2)}
+                </div>
+              </div>
+            );
+          }}
+        />
+        <Area type="monotone" dataKey="pnl" stroke="none" fill="url(#paperPnlGrad)" activeDot={false} />
+        <Area type="monotone" dataKey="pnl" stroke={lineColor} strokeWidth={2} fill="none" dot={{ r: 3, fill: lineColor }} />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ── KPI card ──
+
+function KpiCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+  return (
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">{label}</p>
+      <p className="mt-1 text-xl font-semibold tabular-nums" style={color ? { color } : undefined}>{value}</p>
+      {sub && <p className="text-xs text-[var(--color-text-muted)]">{sub}</p>}
+    </div>
+  );
+}
+
+// ── Trade table ──
+
+function TradeTable({ trades }: { trades: PaperTrade[] }) {
+  const sells = trades.filter((t) => t.side === "SELL");
+  if (sells.length === 0) return (
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center text-sm text-[var(--color-text-muted)]">
+      No closed trades yet — waiting for RSI &lt; 35 + EMA crossover signal.
+    </div>
+  );
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-[var(--color-border)]">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+            {["#", "Time (UTC)", "Entry", "Exit", "P/L $", "P/L %", "Cumul $", "RSI", "Reason"].map((h) => (
+              <th key={h} className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--color-text-muted)]">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {[...sells].reverse().map((t) => {
+            const pnl = t.pnl_usd ?? 0;
+            const col = pnlColor(pnl);
+            // Find matching buy for entry
+            const buy = trades.find((b) => b.side === "BUY" && b.trade_num === t.trade_num);
+            return (
+              <tr key={`${t.trade_num}-sell`} className="border-b border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                <td className="px-3 py-2 font-mono text-[var(--color-text-muted)]">{t.trade_num}</td>
+                <td className="px-3 py-2 tabular-nums text-[var(--color-text-muted)]">{fmt(t.timestamp)}</td>
+                <td className="px-3 py-2 tabular-nums">{buy ? fmtPrice(buy.price) : "—"}</td>
+                <td className="px-3 py-2 tabular-nums">{fmtPrice(t.price)}</td>
+                <td className="px-3 py-2 tabular-nums font-semibold" style={{ color: col }}>{sign(pnl)}${pnl.toFixed(2)}</td>
+                <td className="px-3 py-2 tabular-nums" style={{ color: col }}>{sign(t.pnl_pct ?? 0)}{(t.pnl_pct ?? 0).toFixed(2)}%</td>
+                <td className="px-3 py-2 tabular-nums text-[var(--color-text-muted)]">${(t.cumulative_pnl_usd ?? 0).toFixed(2)}</td>
+                <td className="px-3 py-2 tabular-nums">{t.rsi.toFixed(1)}</td>
+                <td className="px-3 py-2">
+                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                    t.reason === "TP" ? "bg-green-500/15 text-green-400" :
+                    t.reason === "SL" ? "bg-red-500/15 text-red-400" :
+                    "bg-amber-500/15 text-amber-400"
+                  }`}>
+                    {t.reason}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Bot selector ──
+
+function BotTab({ bot, active, onClick }: { bot: PaperTradeBot; active: boolean; onClick: () => void }) {
+  const pnl = bot.summary?.total_pnl ?? 0;
+  return (
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left text-xs transition-all ${
+        active
+          ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10"
+          : "border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]"
+      }`}
+    >
+      <span className="font-mono text-[10px] text-[var(--color-text-muted)] truncate max-w-[180px]">{bot.bot_name}</span>
+      <span className="font-semibold tabular-nums" style={{ color: pnlColor(pnl) }}>
+        {sign(pnl)}${pnl.toFixed(2)}
+      </span>
+    </button>
+  );
+}
+
+// ── Main page ──
+
+export function PaperTrades() {
+  const { data: bots, isLoading, error } = useQuery({
+    queryKey: ["paper-trades"],
+    queryFn: api.getPaperTrades,
+    refetchInterval: 30_000,
+  });
+
+  const [selectedBot, setSelectedBot] = useState<string | null>(null);
+
+  const activeBotName = selectedBot ?? bots?.[0]?.bot_name ?? null;
+  const bot = bots?.find((b) => b.bot_name === activeBotName) ?? null;
+  const s = bot?.summary;
+
+  if (isLoading) return (
+    <div className="flex h-64 items-center justify-center text-[var(--color-text-muted)] text-sm">
+      Loading paper trade history…
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex h-64 items-center justify-center text-red-400 text-sm">
+      Failed to load: {(error as Error).message}
+    </div>
+  );
+
+  if (!bots || bots.length === 0) return (
+    <div className="flex flex-col items-center justify-center gap-3 h-64 text-[var(--color-text-muted)]">
+      <Activity className="h-8 w-8 opacity-30" />
+      <p className="text-sm">No paper trade bots found.</p>
+      <p className="text-xs">Deploy a bot with <code className="bg-[var(--color-surface)] px-1 rounded">bot_add.sh</code> and wait for the first signal.</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div>
+        <h1 className="text-lg font-semibold">Paper Trades</h1>
+        <p className="text-xs text-[var(--color-text-muted)]">Simulated trades — live Kraken prices, no real orders</p>
+      </div>
+
+      {/* Bot tabs (only show if multiple bots) */}
+      {bots.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {bots.map((b) => (
+            <BotTab
+              key={b.bot_name}
+              bot={b}
+              active={b.bot_name === activeBotName}
+              onClick={() => setSelectedBot(b.bot_name)}
+            />
+          ))}
+        </div>
+      )}
+
+      {bot && (
+        <>
+          {/* Active bot name */}
+          {bots.length === 1 && (
+            <p className="font-mono text-xs text-[var(--color-text-muted)]">{bot.bot_name}</p>
+          )}
+
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <KpiCard
+              label="Total P/L"
+              value={`${sign(s?.total_pnl ?? 0)}$${(s?.total_pnl ?? 0).toFixed(2)}`}
+              color={pnlColor(s?.total_pnl ?? 0)}
+            />
+            <KpiCard
+              label="Closed Trades"
+              value={String(s?.closed_trades ?? 0)}
+              sub={`${s?.wins ?? 0}W / ${s?.losses ?? 0}L`}
+            />
+            <KpiCard
+              label="Win Rate"
+              value={s?.closed_trades ? `${s.win_rate.toFixed(1)}%` : "—"}
+              sub={s?.avg_win ? `avg +$${s.avg_win.toFixed(2)} / $${s.avg_loss.toFixed(2)}` : undefined}
+            />
+            <KpiCard
+              label="Open Position"
+              value={s?.open_trade ? `#${s.open_trade.trade_num} LONG` : "Flat"}
+              sub={s?.open_trade ? `@ ${fmtPrice(s.open_trade.price)}` : undefined}
+              color={s?.open_trade ? "#f59e0b" : undefined}
+            />
+          </div>
+
+          {/* Cumulative P/L chart */}
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3">
+            <p className="px-2 pb-2 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">
+              Cumulative P/L
+            </p>
+            <PnlChart trades={bot.trades} />
+          </div>
+
+          {/* Trade table */}
+          <TradeTable trades={bot.trades} />
+        </>
+      )}
+    </div>
+  );
+}

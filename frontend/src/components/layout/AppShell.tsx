@@ -3,6 +3,7 @@ import {
   Activity,
   Bot,
   Brain,
+  FlaskConical,
   MessageSquare,
   Eye,
   Moon,
@@ -30,6 +31,7 @@ const NAV_ITEMS = [
   { to: "/bots", icon: Bot, label: "Bots" },
   { to: "/executors", icon: Activity, label: "Executors" },
   { to: "/agents", icon: Brain, label: "Agents" },
+  { to: "/paper-trades", icon: FlaskConical, label: "Paper" },
   { to: "/routines", icon: Zap, label: "Routines" },
 ] as const;
 
