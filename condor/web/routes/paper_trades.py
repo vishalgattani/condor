@@ -53,24 +53,34 @@ def _summarize(trades: list[dict]) -> dict[str, Any]:
     }
 
 
+def _is_paper_bot(bot_dir: Path) -> bool:
+    """True if this instance was deployed with a paper trade script config."""
+    scripts_conf = bot_dir / "conf" / "scripts"
+    if not scripts_conf.is_dir():
+        return False
+    return any("paper" in f.name for f in scripts_conf.iterdir())
+
+
 @router.get("/paper-trades")
 async def list_paper_trades(user: WebUser = Depends(get_current_user)):
-    """Return paper trade history for all bots that have a paper_trades.json."""
+    """Return paper trade history for all paper-trade bots (with or without trades yet)."""
     instances = _instances_dir()
     result = []
     if not instances.is_dir():
         return result
 
-    for bot_dir in sorted(instances.iterdir()):
+    for bot_dir in sorted(instances.iterdir(), reverse=True):
         if not bot_dir.is_dir():
             continue
+        if not _is_paper_bot(bot_dir):
+            continue
         log = bot_dir / "data" / "paper_trades.json"
-        if not log.exists():
-            continue
-        try:
-            trades = json.loads(log.read_text())
-        except Exception:
-            continue
+        trades: list[dict] = []
+        if log.exists():
+            try:
+                trades = json.loads(log.read_text())
+            except Exception:
+                pass
         result.append({
             "bot_name": bot_dir.name,
             "summary": _summarize(trades),

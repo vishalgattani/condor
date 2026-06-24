@@ -127,8 +127,9 @@ function KpiCard({ label, value, sub, color }: { label: string; value: string; s
 function TradeTable({ trades }: { trades: PaperTrade[] }) {
   const sells = trades.filter((t) => t.side === "SELL");
   if (sells.length === 0) return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center text-sm text-[var(--color-text-muted)]">
-      No closed trades yet — waiting for RSI &lt; 35 + EMA crossover signal.
+    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-center space-y-1">
+      <p className="text-sm text-[var(--color-text-muted)]">No closed trades yet.</p>
+      <p className="text-xs text-[var(--color-text-muted)]">Waiting for RSI &lt; 35 + EMA fast cross above EMA slow on the 1h ETH-USD candle.</p>
     </div>
   );
 
@@ -287,7 +288,7 @@ export function PaperTrades() {
     <div className="flex flex-col items-center justify-center gap-3 h-64 text-[var(--color-text-muted)]">
       <Activity className="h-8 w-8 opacity-30" />
       <p className="text-sm">No paper trade bots found.</p>
-      <p className="text-xs">Deploy a bot with <code className="bg-[var(--color-surface)] px-1 rounded">bot_add.sh</code> and wait for the first signal.</p>
+      <p className="text-xs">Deploy one: <code className="bg-[var(--color-surface)] px-1 rounded">./bot_add.sh --name my-trader</code></p>
     </div>
   );
 
