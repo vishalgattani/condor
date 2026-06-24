@@ -53,11 +53,18 @@ function indicatorRefetchMs(interval: string): number {
   return Math.max(Math.floor(mins * 60_000 / 2), 15_000);
 }
 
+const INTERVALS = ["5m", "15m", "1h", "4h"] as const;
+type Interval = typeof INTERVALS[number];
+
 // ── RSI + EMA chart ──
 
 function IndicatorChart({ botName }: { botName: string }) {
-  const interval = botInterval(botName);
-  const pair     = botPair(botName);
+  const defaultInterval = (botInterval(botName) as Interval) ?? "5m";
+  const pair = botPair(botName);
+
+  const [interval, setInterval] = useState<Interval>(
+    INTERVALS.includes(defaultInterval) ? defaultInterval : "5m"
+  );
 
   const { data, isLoading } = useQuery({
     queryKey: ["indicators", pair, interval],
@@ -103,6 +110,24 @@ function IndicatorChart({ botName }: { botName: string }) {
 
   return (
     <div className="space-y-0">
+      {/* Interval picker */}
+      <div className="flex items-center gap-1 pb-3">
+        {INTERVALS.map((iv) => (
+          <button
+            key={iv}
+            onClick={() => setInterval(iv)}
+            className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+              iv === interval
+                ? "bg-[var(--color-primary)] text-white"
+                : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            {iv}
+          </button>
+        ))}
+        <span className="ml-2 text-[10px] text-[var(--color-text-muted)]">{pair}</span>
+      </div>
+
       {/* Price + EMA panel */}
       <div>
         <div className="flex items-center gap-3 pb-1 text-[10px] text-[var(--color-text-muted)]">
@@ -184,7 +209,7 @@ function IndicatorChart({ botName }: { botName: string }) {
       </div>
 
       <div className="pt-1 text-[10px] text-[var(--color-text-muted)]">
-        {pair} · {interval} candles · refreshes every {indicatorRefetchMs(interval) / 1000}s
+        refreshes every {indicatorRefetchMs(interval) / 1000}s
       </div>
     </div>
   );
