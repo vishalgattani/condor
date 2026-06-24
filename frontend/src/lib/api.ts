@@ -647,6 +647,23 @@ export interface PaperTradeBot {
   trades: PaperTrade[];
 }
 
+export interface IndicatorCandle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  rsi: number | null;
+  ema_fast: number | null;
+  ema_slow: number | null;
+}
+
+export interface IndicatorData {
+  pair: string;
+  interval: string;
+  candles: IndicatorCandle[];
+}
+
 // ── Backtesting ──
 
 export interface BacktestTask {
@@ -1289,5 +1306,10 @@ export const api = {
   getBotLogs: (botName: string, lines = 100) =>
     apiFetch<{ bot_name: string; lines: string[] }>(
       `/api/v1/paper-trades/${encodeURIComponent(botName)}/logs?lines=${lines}`,
+    ),
+
+  getIndicators: (pair: string, interval: string, limit = 60) =>
+    apiFetch<IndicatorData>(
+      `/api/v1/indicators?pair=${encodeURIComponent(pair)}&interval=${encodeURIComponent(interval)}&limit=${limit}`,
     ),
 };

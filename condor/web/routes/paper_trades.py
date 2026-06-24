@@ -6,10 +6,18 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import aiohttp
+import pandas as pd
 from fastapi import APIRouter, Depends, Query
 
 from condor.web.auth import get_current_user
 from condor.web.models import WebUser
+
+# Kraken public OHLC interval in minutes
+_KRAKEN_INTERVAL: dict[str, int] = {
+    "1m": 1, "5m": 5, "15m": 15, "30m": 30,
+    "1h": 60, "4h": 240, "1d": 1440,
+}
 
 router = APIRouter(tags=["paper-trades"])
 
@@ -131,6 +139,56 @@ async def get_paper_trades(bot_name: str, user: WebUser = Depends(get_current_us
         "summary": _summarize(trades),
         "trades": trades,
     }
+
+
+@router.get("/indicators")
+async def get_indicators(
+    pair: str = Query(default="ETH-USD"),
+    interval: str = Query(default="5m"),
+    limit: int = Query(default=60, ge=10, le=200),
+    user: WebUser = Depends(get_current_user),
+):
+    """Fetch OHLC from Kraken, compute RSI(14) + EMA(9/21), return candle series."""
+    kraken_interval = _KRAKEN_INTERVAL.get(interval, 5)
+    kraken_pair = pair.replace("-", "")
+    url = (
+        f"https://api.kraken.com/0/public/OHLC"
+        f"?pair={kraken_pair}&interval={kraken_interval}"
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                data = await resp.json()
+    except Exception as e:
+        return {"error": str(e), "candles": []}
+
+    if data.get("error"):
+        return {"error": data["error"], "candles": []}
+
+    result = data["result"]
+    key = next(k for k in result if k != "last")
+    rows = result[key][-limit:]
+
+    df = pd.DataFrame(rows, columns=["time", "open", "high", "low", "close", "vwap", "volume", "count"])
+    for col in ("open", "high", "low", "close"):
+        df[col] = df[col].astype(float)
+
+    # RSI(14) via Wilder smoothing
+    delta = df["close"].diff()
+    gain = delta.clip(lower=0).ewm(com=13, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(com=13, adjust=False).mean()
+    df["rsi"] = (100 - 100 / (1 + gain / loss.replace(0, float("nan")))).round(2)
+
+    # EMA(9) and EMA(21)
+    df["ema_fast"] = df["close"].ewm(span=9, adjust=False).mean().round(4)
+    df["ema_slow"] = df["close"].ewm(span=21, adjust=False).mean().round(4)
+
+    candles = (
+        df[["time", "open", "high", "low", "close", "rsi", "ema_fast", "ema_slow"]]
+        .where(df.notna(), other=None)
+        .to_dict(orient="records")
+    )
+    return {"pair": pair, "interval": interval, "candles": candles}
 
 
 @router.get("/paper-trades/{bot_name}/logs")

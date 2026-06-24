@@ -4,16 +4,16 @@ import {
   Area,
   CartesianGrid,
   ComposedChart,
+  Line,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import { Activity } from "lucide-react";
+import { Activity, BarChart2, Terminal } from "lucide-react";
 
-import { api, type PaperTrade, type PaperTradeBot } from "@/lib/api";
-import { Terminal } from "lucide-react";
+import { api, type IndicatorCandle, type PaperTrade, type PaperTradeBot } from "@/lib/api";
 import { pnlColor } from "@/lib/formatters";
 
 // ── Helpers ──
@@ -33,6 +33,162 @@ function fmtPrice(v: number) {
 }
 
 function sign(v: number) { return v >= 0 ? "+" : ""; }
+
+// Parse interval string from bot name: "bot-5m-eth-usd-..." → "5m"
+function botInterval(botName: string): string {
+  const m = botName.match(/^bot-(\d+[mhd])-/);
+  return m ? m[1] : "5m";
+}
+
+// Parse pair from bot name: "bot-5m-eth-usd-..." → "ETH-USD"
+function botPair(botName: string): string {
+  const m = botName.match(/^bot-\d+[mhd]-([a-z]+-[a-z]+)-/);
+  return m ? m[1].toUpperCase() : "ETH-USD";
+}
+
+// How often to refetch indicators based on candle interval
+function indicatorRefetchMs(interval: string): number {
+  if (interval.endsWith("h")) return 60_000;
+  const mins = parseInt(interval);
+  return Math.max(Math.floor(mins * 60_000 / 2), 15_000);
+}
+
+// ── RSI + EMA chart ──
+
+function IndicatorChart({ botName }: { botName: string }) {
+  const interval = botInterval(botName);
+  const pair     = botPair(botName);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["indicators", pair, interval],
+    queryFn: () => api.getIndicators(pair, interval, 60),
+    refetchInterval: indicatorRefetchMs(interval),
+  });
+
+  const fmtTime = (t: number) => {
+    const d = new Date(t * 1000);
+    return interval.endsWith("h")
+      ? d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", hour12: false })
+      : d.toLocaleString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+  };
+
+  const candles: IndicatorCandle[] = data?.candles ?? [];
+
+  if (isLoading) return (
+    <div className="flex h-40 items-center justify-center text-[var(--color-text-muted)] text-xs">
+      Loading {pair} {interval} candles…
+    </div>
+  );
+
+  if (!candles.length) return (
+    <div className="flex h-40 items-center justify-center text-[var(--color-text-muted)] text-xs">
+      No candle data returned.
+    </div>
+  );
+
+  const prices = candles.map((c) => c.close);
+  const yMin = Math.floor(Math.min(...prices) * 0.9995);
+  const yMax = Math.ceil(Math.max(...prices) * 1.0005);
+
+  const tickProps = { fontSize: 10, fill: "var(--color-text-muted)" };
+  const gridProps = { strokeDasharray: "3 3", stroke: "var(--color-border)", strokeOpacity: 0.4 };
+  const xAxisProps = {
+    dataKey: "time" as const,
+    tickFormatter: fmtTime,
+    tick: tickProps,
+    stroke: "var(--color-border)",
+    tickLine: false,
+    minTickGap: 48,
+  };
+
+  return (
+    <div className="space-y-0">
+      {/* Price + EMA panel */}
+      <div>
+        <div className="flex items-center gap-3 pb-1 text-[10px] text-[var(--color-text-muted)]">
+          <span className="font-bold uppercase tracking-widest">Price + EMA</span>
+          <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 bg-blue-400" />EMA 9</span>
+          <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 bg-orange-400" />EMA 21</span>
+        </div>
+        <ResponsiveContainer width="100%" height={180}>
+          <ComposedChart data={candles} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+            <CartesianGrid {...gridProps} />
+            <XAxis {...xAxisProps} />
+            <YAxis
+              domain={[yMin, yMax]}
+              tickFormatter={(v) => `$${v.toLocaleString()}`}
+              tick={tickProps}
+              stroke="var(--color-border)"
+              tickLine={false}
+              axisLine={false}
+              width={72}
+            />
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const c = payload[0].payload as IndicatorCandle;
+                return (
+                  <div className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/95 px-2.5 py-2 text-[10px] shadow-lg space-y-0.5">
+                    <div className="text-[var(--color-text-muted)]">{fmtTime(c.time)}</div>
+                    <div>Close: <span className="font-mono font-semibold">{fmtPrice(c.close)}</span></div>
+                    {c.ema_fast != null && <div className="text-blue-400">EMA9: {fmtPrice(c.ema_fast)}</div>}
+                    {c.ema_slow != null && <div className="text-orange-400">EMA21: {fmtPrice(c.ema_slow)}</div>}
+                  </div>
+                );
+              }}
+            />
+            <Line type="monotone" dataKey="close" stroke="var(--color-text-muted)" strokeWidth={1.5} dot={false} connectNulls />
+            <Line type="monotone" dataKey="ema_fast" stroke="#60a5fa" strokeWidth={1.5} dot={false} connectNulls />
+            <Line type="monotone" dataKey="ema_slow" stroke="#fb923c" strokeWidth={1.5} dot={false} connectNulls />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* RSI panel */}
+      <div>
+        <div className="pb-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">RSI (14)</div>
+        <ResponsiveContainer width="100%" height={120}>
+          <ComposedChart data={candles} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+            <CartesianGrid {...gridProps} />
+            <XAxis {...xAxisProps} />
+            <YAxis
+              domain={[0, 100]}
+              ticks={[0, 30, 50, 70, 100]}
+              tick={tickProps}
+              stroke="var(--color-border)"
+              tickLine={false}
+              axisLine={false}
+              width={32}
+            />
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const c = payload[0].payload as IndicatorCandle;
+                const rsi = c.rsi;
+                if (rsi == null) return null;
+                const color = rsi < 30 ? "#22c55e" : rsi > 70 ? "#ef4444" : "var(--color-text)";
+                return (
+                  <div className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/95 px-2.5 py-2 text-[10px] shadow-lg">
+                    <div className="text-[var(--color-text-muted)]">{fmtTime(c.time)}</div>
+                    <div style={{ color }}>RSI: <span className="font-mono font-semibold">{rsi.toFixed(1)}</span></div>
+                  </div>
+                );
+              }}
+            />
+            <ReferenceLine y={70} stroke="#ef4444" strokeOpacity={0.5} strokeDasharray="3 3" />
+            <ReferenceLine y={30} stroke="#22c55e" strokeOpacity={0.5} strokeDasharray="3 3" />
+            <ReferenceLine y={50} stroke="var(--color-text-muted)" strokeOpacity={0.2} strokeDasharray="2 4" />
+            <Line type="monotone" dataKey="rsi" stroke="#a78bfa" strokeWidth={1.5} dot={false} connectNulls />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="pt-1 text-[10px] text-[var(--color-text-muted)]">
+        {pair} · {interval} candles · refreshes every {indicatorRefetchMs(interval) / 1000}s
+      </div>
+    </div>
+  );
+}
 
 // ── Cumulative P/L chart ──
 
@@ -142,7 +298,6 @@ function TradeTable({ trades }: { trades: PaperTrade[] }) {
           {[...sells].reverse().map((t) => {
             const pnl = t.pnl_usd ?? 0;
             const col = pnlColor(pnl);
-            // Find matching buy for entry
             const buy = trades.find((b) => b.side === "BUY" && b.trade_num === t.trade_num);
             return (
               <tr key={`${t.trade_num}-sell`} className="border-b border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] transition-colors">
@@ -172,7 +327,7 @@ function TradeTable({ trades }: { trades: PaperTrade[] }) {
   );
 }
 
-// ── Bot selector ──
+// ── Bot selector tab ──
 
 function BotTab({ bot, active, onClick }: { bot: PaperTradeBot; active: boolean; onClick: () => void }) {
   const pnl = bot.summary?.total_pnl ?? 0;
@@ -265,6 +420,7 @@ export function PaperTrades() {
   });
 
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
+  const [showChart, setShowChart] = useState(true);
 
   const activeBotName = selectedBot ?? bots?.[0]?.bot_name ?? null;
   const bot = bots?.find((b) => b.bot_name === activeBotName) ?? null;
@@ -293,12 +449,25 @@ export function PaperTrades() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div>
-        <h1 className="text-lg font-semibold">Paper Trades</h1>
-        <p className="text-xs text-[var(--color-text-muted)]">Simulated trades — live Kraken prices, no real orders</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-lg font-semibold">Paper Trades</h1>
+          <p className="text-xs text-[var(--color-text-muted)]">Simulated trades — live Kraken prices, no real orders</p>
+        </div>
+        <button
+          onClick={() => setShowChart((v) => !v)}
+          className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+            showChart
+              ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+              : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
+          }`}
+        >
+          <BarChart2 className="h-3.5 w-3.5" />
+          {showChart ? "Hide chart" : "Show chart"}
+        </button>
       </div>
 
-      {/* Bot tabs (only show if multiple bots) */}
+      {/* Bot tabs (only when multiple bots) */}
       {bots.length > 1 && (
         <div className="flex flex-wrap gap-2">
           {bots.map((b) => (
@@ -314,7 +483,7 @@ export function PaperTrades() {
 
       {bot && (
         <>
-          {/* Active bot name + status */}
+          {/* Single-bot name + status */}
           {bots.length === 1 && (
             <div className="flex items-center gap-2">
               <span className={`h-2 w-2 rounded-full ${bot.running ? "bg-green-400 shadow-[0_0_6px_#4ade80]" : "bg-[var(--color-text-muted)]"}`} />
@@ -349,6 +518,13 @@ export function PaperTrades() {
               color={s?.open_trade ? "#f59e0b" : undefined}
             />
           </div>
+
+          {/* RSI + EMA chart (toggleable) */}
+          {showChart && (
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
+              <IndicatorChart botName={bot.bot_name} />
+            </div>
+          )}
 
           {/* Cumulative P/L chart */}
           <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3">
