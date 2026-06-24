@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 from pathlib import Path
@@ -183,11 +184,11 @@ async def get_indicators(
     df["ema_fast"] = df["close"].ewm(span=9, adjust=False).mean().round(4)
     df["ema_slow"] = df["close"].ewm(span=21, adjust=False).mean().round(4)
 
-    candles = (
-        df[["time", "open", "high", "low", "close", "rsi", "ema_fast", "ema_slow"]]
-        .where(df.notna(), other=None)
-        .to_dict(orient="records")
-    )
+    raw = df[["time", "open", "high", "low", "close", "rsi", "ema_fast", "ema_slow"]].to_dict(orient="records")
+    candles = [
+        {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
+        for row in raw
+    ]
     return {"pair": pair, "interval": interval, "candles": candles}
 
 
