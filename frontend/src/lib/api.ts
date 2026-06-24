@@ -642,6 +642,7 @@ export interface PaperTradeSummary {
 
 export interface PaperTradeBot {
   bot_name: string;
+  running: boolean;
   summary: PaperTradeSummary | null;
   trades: PaperTrade[];
 }

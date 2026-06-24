@@ -190,7 +190,10 @@ function BotTab({ bot, active, onClick }: { bot: PaperTradeBot; active: boolean;
           : "border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]"
       }`}
     >
-      <span className="font-mono text-[10px] text-[var(--color-text-muted)] truncate max-w-[180px]">{bot.bot_name}</span>
+      <div className="flex items-center gap-1.5">
+        <span className={`h-1.5 w-1.5 rounded-full ${bot.running ? "bg-green-400" : "bg-[var(--color-text-muted)]"}`} />
+        <span className="font-mono text-[10px] text-[var(--color-text-muted)] truncate max-w-[180px]">{bot.bot_name}</span>
+      </div>
       <span className="font-semibold tabular-nums" style={{ color: pnlColor(pnl) }}>
         {sign(pnl)}${pnl.toFixed(2)}
       </span>
@@ -316,9 +319,15 @@ export function PaperTrades() {
 
       {bot && (
         <>
-          {/* Active bot name */}
+          {/* Active bot name + status */}
           {bots.length === 1 && (
-            <p className="font-mono text-xs text-[var(--color-text-muted)]">{bot.bot_name}</p>
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${bot.running ? "bg-green-400 shadow-[0_0_6px_#4ade80]" : "bg-[var(--color-text-muted)]"}`} />
+              <p className="font-mono text-xs text-[var(--color-text-muted)]">{bot.bot_name}</p>
+              <span className={`text-[10px] font-medium ${bot.running ? "text-green-400" : "text-[var(--color-text-muted)]"}`}>
+                {bot.running ? "running" : "stopped"}
+              </span>
+            </div>
           )}
 
           {/* KPI cards */}

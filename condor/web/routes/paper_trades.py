@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import StreamingResponse
 
 from condor.web.auth import get_current_user
 from condor.web.models import WebUser
@@ -61,28 +61,54 @@ def _is_paper_bot(bot_dir: Path) -> bool:
     return any("paper" in f.name for f in scripts_conf.iterdir())
 
 
+def _running_containers() -> set[str]:
+    """Return names of currently running Docker containers."""
+    try:
+        out = subprocess.check_output(
+            ["docker", "ps", "--format", "{{.Names}}"], timeout=5
+        )
+        return {n.strip() for n in out.decode().splitlines() if n.strip()}
+    except Exception:
+        return set()
+
+
 @router.get("/paper-trades")
 async def list_paper_trades(user: WebUser = Depends(get_current_user)):
-    """Return paper trade history for all paper-trade bots (with or without trades yet)."""
+    """Return paper trade bots that are currently running OR have trade history.
+
+    Stopped instances with no trades are hidden — they're just old debugging runs.
+    """
     instances = _instances_dir()
     result = []
     if not instances.is_dir():
         return result
+
+    running = _running_containers()
 
     for bot_dir in sorted(instances.iterdir(), reverse=True):
         if not bot_dir.is_dir():
             continue
         if not _is_paper_bot(bot_dir):
             continue
+
+        is_running = bot_dir.name in running
         log = bot_dir / "data" / "paper_trades.json"
+        has_trades = log.exists()
+
+        # Skip stopped bots with no trade history — they're abandoned runs
+        if not is_running and not has_trades:
+            continue
+
         trades: list[dict] = []
-        if log.exists():
+        if has_trades:
             try:
                 trades = json.loads(log.read_text())
             except Exception:
                 pass
+
         result.append({
             "bot_name": bot_dir.name,
+            "running": is_running,
             "summary": _summarize(trades),
             "trades": trades,
         })
