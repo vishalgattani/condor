@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -9,6 +9,7 @@ import {
   Copy,
   Grid3X3,
   Layers,
+  LineChart,
   Loader2,
   Rocket,
   Settings2,
@@ -38,6 +39,73 @@ import {
   type GridAction,
   isSpotConnector,
 } from "@/pages/CreateGridExecutor";
+
+// ── TradingView indicator panel ──
+
+const TV_RESOLUTION: Record<string, string> = {
+  "1m": "1", "3m": "3", "5m": "5", "15m": "15", "30m": "30",
+  "1h": "60", "4h": "240", "1d": "D",
+};
+
+function tvSymbol(connector: string, pair: string): string {
+  const exchange = connector
+    .replace(/_paper_trade$/, "")
+    .replace(/_perpetual$/, "")
+    .toUpperCase();
+  return `${exchange}:${pair.replace("-", "")}`;
+}
+
+function TradingViewPanel({ connector, pair, interval }: { connector: string; pair: string; interval: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const widgetId = useMemo(() => `tv_trade_${Math.random().toString(36).slice(2, 9)}`, []);
+
+  useEffect(() => {
+    const symbol = tvSymbol(connector, pair);
+    const resolution = TV_RESOLUTION[interval] ?? "5";
+
+    function mount() {
+      if (!containerRef.current) return;
+      containerRef.current.innerHTML = `<div id="${widgetId}"></div>`;
+      new (window as any).TradingView.widget({
+        container_id: widgetId,
+        symbol,
+        interval: resolution,
+        width: "100%",
+        height: 400,
+        timezone: "Etc/UTC",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        enable_publishing: false,
+        allow_symbol_change: false,
+        studies: ["RSI@tv-basicstudies", "MAExp@tv-basicstudies"],
+        hide_side_toolbar: false,
+        withdateranges: false,
+        save_image: false,
+      });
+    }
+
+    if ((window as any).TradingView?.widget) {
+      mount();
+      return;
+    }
+    const existing = document.querySelector('script[src*="tradingview.com/tv.js"]');
+    if (existing) {
+      let poll = 0;
+      poll = window.setInterval(() => {
+        if ((window as any).TradingView?.widget) { window.clearInterval(poll); mount(); }
+      }, 100);
+      return () => window.clearInterval(poll);
+    }
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.async = true;
+    script.onload = mount;
+    document.head.appendChild(script);
+  }, [connector, pair, interval, widgetId]);
+
+  return <div ref={containerRef} className="h-full w-full" />;
+}
 
 // ── Grid state management (reuse from CreateGridExecutor) ──
 
@@ -226,6 +294,7 @@ export function CreateExecutor() {
   const [rightPanelWidth, setRightPanelWidth] = useState(288);
   const [bottomPaneHeight, setBottomPaneHeight] = useState(200);
   const [selectedExecutorId, setSelectedExecutorId] = useState<string | null>(null);
+  const [showTVPanel, setShowTVPanel] = useState(false);
 
   const startHDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -543,6 +612,20 @@ export function CreateExecutor() {
               ))}
             </div>
           </div>
+
+          {/* TradingView indicators toggle */}
+          <button
+            onClick={() => setShowTVPanel((v) => !v)}
+            title="Toggle indicator chart"
+            className={`flex items-center gap-1.5 border-l border-[var(--color-border)] px-3 py-2 text-xs transition-colors ${
+              showTVPanel
+                ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
+            }`}
+          >
+            <LineChart className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Indicators</span>
+          </button>
         </div>
       </div>
 
@@ -583,6 +666,18 @@ export function CreateExecutor() {
           >
             <div className="absolute inset-x-0 top-1/2 mx-auto h-px w-12 -translate-y-1/2 rounded bg-amber-400/60 group-hover/hdrag:bg-amber-400 transition-colors" />
           </div>
+          {/* TradingView indicator panel */}
+          {showTVPanel && (
+            <div className="shrink-0 border-t border-[var(--color-border)]" style={{ height: 420 }}>
+              <TradingViewPanel
+                key={`${connector}:${pair}:${gridState.interval}`}
+                connector={connector}
+                pair={pair}
+                interval={gridState.interval}
+              />
+            </div>
+          )}
+
           <div style={{ height: bottomPaneHeight }} className="shrink-0 overflow-hidden">
             <TradeBottomPane
               executors={mainExecutors}

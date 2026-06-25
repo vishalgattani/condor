@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Activity, BarChart2, Terminal } from "lucide-react";
+import { Activity, Terminal } from "lucide-react";
 
 import { api, type PaperTrade, type PaperTradeBot } from "@/lib/api";
 import { pnlColor } from "@/lib/formatters";
@@ -33,109 +33,7 @@ function fmtPrice(v: number) {
 
 function sign(v: number) { return v >= 0 ? "+" : ""; }
 
-// Parse interval string from bot name: "bot-5m-eth-usd-..." → "5m"
-function botInterval(botName: string): string {
-  const m = botName.match(/^bot-(\d+[mhd])-/);
-  return m ? m[1] : "5m";
-}
 
-// Parse pair from bot name: "bot-5m-eth-usd-..." → "ETH-USD"
-function botPair(botName: string): string {
-  const m = botName.match(/^bot-\d+[mhd]-([a-z]+-[a-z]+)-/);
-  return m ? m[1].toUpperCase() : "ETH-USD";
-}
-
-const INTERVALS = ["5m", "15m", "1h", "4h"] as const;
-type Interval = typeof INTERVALS[number];
-
-const TV_RESOLUTION: Record<string, string> = { "5m": "5", "15m": "15", "1h": "60", "4h": "240" };
-
-// ── TradingView chart ──
-
-function TradingViewChart({ botName }: { botName: string }) {
-  const defaultInterval = botInterval(botName) as Interval;
-  const pair = botPair(botName);
-  const [interval, setInterval] = useState<Interval>(
-    INTERVALS.includes(defaultInterval) ? defaultInterval : "5m"
-  );
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const widgetId = useMemo(() => `tv_${Math.random().toString(36).slice(2, 9)}`, []);
-
-  useEffect(() => {
-    const symbol = "KRAKEN:" + pair.replace("-", "");
-    const resolution = TV_RESOLUTION[interval] ?? "5";
-
-    function mount() {
-      if (!containerRef.current) return;
-      containerRef.current.innerHTML = `<div id="${widgetId}"></div>`;
-      new (window as any).TradingView.widget({
-        container_id: widgetId,
-        symbol,
-        interval: resolution,
-        width: "100%",
-        height: 420,
-        timezone: "Etc/UTC",
-        theme: "dark",
-        style: "1",
-        locale: "en",
-        enable_publishing: false,
-        allow_symbol_change: false,
-        studies: ["RSI@tv-basicstudies", "MAExp@tv-basicstudies", "MAExp@tv-basicstudies"],
-        studies_overrides: {
-          "moving average exponential.length": 9,
-        },
-        hide_side_toolbar: false,
-        withdateranges: true,
-        save_image: false,
-      });
-    }
-
-    if ((window as any).TradingView?.widget) {
-      mount();
-      return;
-    }
-
-    // Script not yet loaded
-    const existing = document.querySelector('script[src*="tradingview.com/tv.js"]');
-    if (existing) {
-      // Script is in DOM but still loading — poll
-      let poll = 0;
-      poll = window.setInterval(() => {
-        if ((window as any).TradingView?.widget) { window.clearInterval(poll); mount(); }
-      }, 100);
-      return () => window.clearInterval(poll);
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://s3.tradingview.com/tv.js";
-    script.async = true;
-    script.onload = mount;
-    document.head.appendChild(script);
-  }, [pair, interval, widgetId]);
-
-  return (
-    <div className="space-y-0">
-      <div className="flex items-center gap-1 pb-3">
-        {INTERVALS.map((iv) => (
-          <button
-            key={iv}
-            onClick={() => setInterval(iv)}
-            className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
-              iv === interval
-                ? "bg-[var(--color-primary)] text-white"
-                : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-            }`}
-          >
-            {iv}
-          </button>
-        ))}
-        <span className="ml-2 text-[10px] text-[var(--color-text-muted)]">{pair}</span>
-      </div>
-      <div ref={containerRef} />
-    </div>
-  );
-}
 
 // ── Cumulative P/L chart ──
 
@@ -367,7 +265,6 @@ export function PaperTrades() {
   });
 
   const [selectedBot, setSelectedBot] = useState<string | null>(null);
-  const [showChart, setShowChart] = useState(true);
 
   const activeBotName = selectedBot ?? bots?.[0]?.bot_name ?? null;
   const bot = bots?.find((b) => b.bot_name === activeBotName) ?? null;
@@ -396,22 +293,9 @@ export function PaperTrades() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-lg font-semibold">Paper Trades</h1>
-          <p className="text-xs text-[var(--color-text-muted)]">Simulated trades — live Kraken prices, no real orders</p>
-        </div>
-        <button
-          onClick={() => setShowChart((v) => !v)}
-          className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-            showChart
-              ? "border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
-              : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-          }`}
-        >
-          <BarChart2 className="h-3.5 w-3.5" />
-          {showChart ? "Hide chart" : "Show chart"}
-        </button>
+      <div>
+        <h1 className="text-lg font-semibold">Paper Trades</h1>
+        <p className="text-xs text-[var(--color-text-muted)]">Simulated trades — live Kraken prices, no real orders</p>
       </div>
 
       {/* Bot tabs (only when multiple bots) */}
@@ -465,13 +349,6 @@ export function PaperTrades() {
               color={s?.open_trade ? "#f59e0b" : undefined}
             />
           </div>
-
-          {/* TradingView chart (toggleable) */}
-          {showChart && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
-              <TradingViewChart botName={bot.bot_name} />
-            </div>
-          )}
 
           {/* Cumulative P/L chart */}
           <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-3">
