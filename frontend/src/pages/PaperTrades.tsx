@@ -4,7 +4,6 @@ import {
   Area,
   CartesianGrid,
   ComposedChart,
-  Line,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -13,7 +12,7 @@ import {
 } from "recharts";
 import { Activity, BarChart2, Terminal } from "lucide-react";
 
-import { api, type IndicatorCandle, type PaperTrade, type PaperTradeBot } from "@/lib/api";
+import { api, type PaperTrade, type PaperTradeBot } from "@/lib/api";
 import { pnlColor } from "@/lib/formatters";
 
 // ── Helpers ──
@@ -46,71 +45,77 @@ function botPair(botName: string): string {
   return m ? m[1].toUpperCase() : "ETH-USD";
 }
 
-// How often to refetch indicators based on candle interval
-function indicatorRefetchMs(interval: string): number {
-  if (interval.endsWith("h")) return 60_000;
-  const mins = parseInt(interval);
-  return Math.max(Math.floor(mins * 60_000 / 2), 15_000);
-}
-
 const INTERVALS = ["5m", "15m", "1h", "4h"] as const;
 type Interval = typeof INTERVALS[number];
 
-// ── RSI + EMA chart ──
+const TV_RESOLUTION: Record<string, string> = { "5m": "5", "15m": "15", "1h": "60", "4h": "240" };
 
-function IndicatorChart({ botName }: { botName: string }) {
-  const defaultInterval = (botInterval(botName) as Interval) ?? "5m";
+// ── TradingView chart ──
+
+function TradingViewChart({ botName }: { botName: string }) {
+  const defaultInterval = botInterval(botName) as Interval;
   const pair = botPair(botName);
-
   const [interval, setInterval] = useState<Interval>(
     INTERVALS.includes(defaultInterval) ? defaultInterval : "5m"
   );
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["indicators", pair, interval],
-    queryFn: () => api.getIndicators(pair, interval, 60),
-    refetchInterval: indicatorRefetchMs(interval),
-  });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const widgetId = useMemo(() => `tv_${Math.random().toString(36).slice(2, 9)}`, []);
 
-  const fmtTime = (t: number) => {
-    const d = new Date(t * 1000);
-    return interval.endsWith("h")
-      ? d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", hour12: false })
-      : d.toLocaleString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
-  };
+  useEffect(() => {
+    const symbol = "KRAKEN:" + pair.replace("-", "");
+    const resolution = TV_RESOLUTION[interval] ?? "5";
 
-  const candles: IndicatorCandle[] = data?.candles ?? [];
+    function mount() {
+      if (!containerRef.current) return;
+      containerRef.current.innerHTML = `<div id="${widgetId}"></div>`;
+      new (window as any).TradingView.widget({
+        container_id: widgetId,
+        symbol,
+        interval: resolution,
+        width: "100%",
+        height: 420,
+        timezone: "Etc/UTC",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        enable_publishing: false,
+        allow_symbol_change: false,
+        studies: ["RSI@tv-basicstudies", "MAExp@tv-basicstudies", "MAExp@tv-basicstudies"],
+        studies_overrides: {
+          "moving average exponential.length": 9,
+        },
+        hide_side_toolbar: false,
+        withdateranges: true,
+        save_image: false,
+      });
+    }
 
-  if (isLoading) return (
-    <div className="flex h-40 items-center justify-center text-[var(--color-text-muted)] text-xs">
-      Loading {pair} {interval} candles…
-    </div>
-  );
+    if ((window as any).TradingView?.widget) {
+      mount();
+      return;
+    }
 
-  if (!candles.length) return (
-    <div className="flex h-40 items-center justify-center text-[var(--color-text-muted)] text-xs">
-      No candle data returned.
-    </div>
-  );
+    // Script not yet loaded
+    const existing = document.querySelector('script[src*="tradingview.com/tv.js"]');
+    if (existing) {
+      // Script is in DOM but still loading — poll
+      let poll = 0;
+      poll = window.setInterval(() => {
+        if ((window as any).TradingView?.widget) { window.clearInterval(poll); mount(); }
+      }, 100);
+      return () => window.clearInterval(poll);
+    }
 
-  const prices = candles.map((c) => c.close);
-  const yMin = Math.floor(Math.min(...prices) * 0.9995);
-  const yMax = Math.ceil(Math.max(...prices) * 1.0005);
-
-  const tickProps = { fontSize: 10, fill: "var(--color-text-muted)" };
-  const gridProps = { strokeDasharray: "3 3", stroke: "var(--color-border)", strokeOpacity: 0.4 };
-  const xAxisProps = {
-    dataKey: "time" as const,
-    tickFormatter: fmtTime,
-    tick: tickProps,
-    stroke: "var(--color-border)",
-    tickLine: false,
-    minTickGap: 48,
-  };
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/tv.js";
+    script.async = true;
+    script.onload = mount;
+    document.head.appendChild(script);
+  }, [pair, interval, widgetId]);
 
   return (
     <div className="space-y-0">
-      {/* Interval picker */}
       <div className="flex items-center gap-1 pb-3">
         {INTERVALS.map((iv) => (
           <button
@@ -127,90 +132,7 @@ function IndicatorChart({ botName }: { botName: string }) {
         ))}
         <span className="ml-2 text-[10px] text-[var(--color-text-muted)]">{pair}</span>
       </div>
-
-      {/* Price + EMA panel */}
-      <div>
-        <div className="flex items-center gap-3 pb-1 text-[10px] text-[var(--color-text-muted)]">
-          <span className="font-bold uppercase tracking-widest">Price + EMA</span>
-          <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 bg-blue-400" />EMA 9</span>
-          <span className="flex items-center gap-1"><span className="inline-block h-0.5 w-4 bg-orange-400" />EMA 21</span>
-        </div>
-        <ResponsiveContainer width="100%" height={180}>
-          <ComposedChart data={candles} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
-            <CartesianGrid {...gridProps} />
-            <XAxis {...xAxisProps} />
-            <YAxis
-              domain={[yMin, yMax]}
-              tickFormatter={(v) => `$${v.toLocaleString()}`}
-              tick={tickProps}
-              stroke="var(--color-border)"
-              tickLine={false}
-              axisLine={false}
-              width={72}
-            />
-            <Tooltip
-              content={({ active, payload }) => {
-                if (!active || !payload?.length) return null;
-                const c = payload[0].payload as IndicatorCandle;
-                return (
-                  <div className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/95 px-2.5 py-2 text-[10px] shadow-lg space-y-0.5">
-                    <div className="text-[var(--color-text-muted)]">{fmtTime(c.time)}</div>
-                    <div>Close: <span className="font-mono font-semibold">{fmtPrice(c.close)}</span></div>
-                    {c.ema_fast != null && <div className="text-blue-400">EMA9: {fmtPrice(c.ema_fast)}</div>}
-                    {c.ema_slow != null && <div className="text-orange-400">EMA21: {fmtPrice(c.ema_slow)}</div>}
-                  </div>
-                );
-              }}
-            />
-            <Line type="monotone" dataKey="close" stroke="var(--color-text-muted)" strokeWidth={1.5} dot={false} connectNulls />
-            <Line type="monotone" dataKey="ema_fast" stroke="#60a5fa" strokeWidth={1.5} dot={false} connectNulls />
-            <Line type="monotone" dataKey="ema_slow" stroke="#fb923c" strokeWidth={1.5} dot={false} connectNulls />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* RSI panel */}
-      <div>
-        <div className="pb-1 text-[10px] font-bold uppercase tracking-widest text-[var(--color-text-muted)]">RSI (14)</div>
-        <ResponsiveContainer width="100%" height={120}>
-          <ComposedChart data={candles} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
-            <CartesianGrid {...gridProps} />
-            <XAxis {...xAxisProps} />
-            <YAxis
-              domain={[0, 100]}
-              ticks={[0, 30, 50, 70, 100]}
-              tick={tickProps}
-              stroke="var(--color-border)"
-              tickLine={false}
-              axisLine={false}
-              width={32}
-            />
-            <Tooltip
-              content={({ active, payload }) => {
-                if (!active || !payload?.length) return null;
-                const c = payload[0].payload as IndicatorCandle;
-                const rsi = c.rsi;
-                if (rsi == null) return null;
-                const color = rsi < 30 ? "#22c55e" : rsi > 70 ? "#ef4444" : "var(--color-text)";
-                return (
-                  <div className="rounded border border-[var(--color-border)] bg-[var(--color-bg)]/95 px-2.5 py-2 text-[10px] shadow-lg">
-                    <div className="text-[var(--color-text-muted)]">{fmtTime(c.time)}</div>
-                    <div style={{ color }}>RSI: <span className="font-mono font-semibold">{rsi.toFixed(1)}</span></div>
-                  </div>
-                );
-              }}
-            />
-            <ReferenceLine y={70} stroke="#ef4444" strokeOpacity={0.5} strokeDasharray="3 3" />
-            <ReferenceLine y={30} stroke="#22c55e" strokeOpacity={0.5} strokeDasharray="3 3" />
-            <ReferenceLine y={50} stroke="var(--color-text-muted)" strokeOpacity={0.2} strokeDasharray="2 4" />
-            <Line type="monotone" dataKey="rsi" stroke="#a78bfa" strokeWidth={1.5} dot={false} connectNulls />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div className="pt-1 text-[10px] text-[var(--color-text-muted)]">
-        refreshes every {indicatorRefetchMs(interval) / 1000}s
-      </div>
+      <div ref={containerRef} />
     </div>
   );
 }
@@ -544,10 +466,10 @@ export function PaperTrades() {
             />
           </div>
 
-          {/* RSI + EMA chart (toggleable) */}
+          {/* TradingView chart (toggleable) */}
           {showChart && (
             <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
-              <IndicatorChart botName={bot.bot_name} />
+              <TradingViewChart botName={bot.bot_name} />
             </div>
           )}
 
