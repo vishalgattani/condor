@@ -9,7 +9,7 @@ import {
   Copy,
   Grid3X3,
   Layers,
-  LineChart,
+
   Loader2,
   Rocket,
   Settings2,
@@ -294,7 +294,6 @@ export function CreateExecutor() {
   const [rightPanelWidth, setRightPanelWidth] = useState(288);
   const [bottomPaneHeight, setBottomPaneHeight] = useState(200);
   const [selectedExecutorId, setSelectedExecutorId] = useState<string | null>(null);
-  const [showTVPanel, setShowTVPanel] = useState(false);
 
   const startHDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -613,19 +612,6 @@ export function CreateExecutor() {
             </div>
           </div>
 
-          {/* TradingView indicators toggle */}
-          <button
-            onClick={() => setShowTVPanel((v) => !v)}
-            title="Toggle indicator chart"
-            className={`flex items-center gap-1.5 border-l border-[var(--color-border)] px-3 py-2 text-xs transition-colors ${
-              showTVPanel
-                ? "bg-[var(--color-primary)]/10 text-[var(--color-primary)]"
-                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-            }`}
-          >
-            <LineChart className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Indicators</span>
-          </button>
         </div>
       </div>
 
@@ -633,6 +619,16 @@ export function CreateExecutor() {
       <div className="flex min-h-0 flex-1">
         {/* Chart + Bottom Pane */}
         <div className="min-w-0 flex-1 flex flex-col">
+          {/* TradingView indicator panel — always visible */}
+          <div className="shrink-0 border-b border-[var(--color-border)]" style={{ height: 280 }}>
+            <TradingViewPanel
+              key={`${connector}:${pair}:${gridState.interval}`}
+              connector={connector}
+              pair={pair}
+              interval={gridState.interval}
+            />
+          </div>
+          {/* Lightweight chart with executor overlays */}
           <div className="flex-1 min-h-0 overflow-hidden bg-[var(--color-surface)]">
             <TradeChart
               key={`${connector}:${pair}:${gridState.interval}`}
@@ -666,17 +662,6 @@ export function CreateExecutor() {
           >
             <div className="absolute inset-x-0 top-1/2 mx-auto h-px w-12 -translate-y-1/2 rounded bg-amber-400/60 group-hover/hdrag:bg-amber-400 transition-colors" />
           </div>
-          {/* TradingView indicator panel */}
-          {showTVPanel && (
-            <div className="shrink-0 border-t border-[var(--color-border)]" style={{ height: 420 }}>
-              <TradingViewPanel
-                key={`${connector}:${pair}:${gridState.interval}`}
-                connector={connector}
-                pair={pair}
-                interval={gridState.interval}
-              />
-            </div>
-          )}
 
           <div style={{ height: bottomPaneHeight }} className="shrink-0 overflow-hidden">
             <TradeBottomPane
